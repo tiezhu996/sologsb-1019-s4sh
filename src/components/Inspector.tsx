@@ -10,7 +10,7 @@ export default function Inspector(props: { store: Store }) {
   const [memo, setMemo] = createSignal('');
   const [example, setExample] = createSignal('');
   const [segmentNote, setSegmentNote] = createSignal('');
-  const [section, setSection] = createSignal<'theme' | 'compare' | 'audit'>('theme');
+  const [section, setSection] = createSignal<'theme' | 'compare' | 'audit' | 'withdrawals'>('theme');
 
   const theme = createMemo(() => props.store.state.themes.find((item) => item.id === props.store.state.activeThemeId));
   const segment = createMemo(() => props.store.state.segments.find((item) => item.id === props.store.state.activeSegmentId));
@@ -49,10 +49,11 @@ export default function Inspector(props: { store: Store }) {
           <Typography variant="h6">主题与判断</Typography>
         </div>
       </div>
-      <div class="inspector-tabs">
+      <div class="inspector-tabs four">
         <button classList={{ active: section() === 'theme' }} onClick={() => setSection('theme')}>主题记事</button>
         <button classList={{ active: section() === 'compare' }} onClick={() => setSection('compare')}>双人比较</button>
         <button classList={{ active: section() === 'audit' }} onClick={() => setSection('audit')}>操作记录</button>
+        <button classList={{ active: section() === 'withdrawals' }} onClick={() => setSection('withdrawals')}>撤回记录</button>
       </div>
       <Divider />
 
@@ -148,6 +149,51 @@ export default function Inspector(props: { store: Store }) {
             <div class="audit-item"><span>{new Date(entry.at).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}</span><div><strong>{entry.action}</strong><p>{entry.detail}</p></div></div>
           )}</For>
         </div>
+      </Show>
+      <Show when={section() === 'withdrawals'}>
+        <Show when={props.store.state.withdrawals.length} fallback={
+          <div class="empty-state">暂无撤回记录。受访者行使撤回同意后，原文、片段、A/B 判断与工作台内导出都会被彻底移除，此处仅保留不含原文的处理记录。</div>
+        }>
+          <div class="withdraw-ledger-list">
+            <For each={props.store.state.withdrawals}>{(record) => (
+              <details class="withdraw-ledger-card">
+                <summary>
+                  <div><strong>{record.transcriptTitle}</strong><span>{record.participantLabel} · {new Date(record.completedAt).toLocaleDateString('zh-CN')}</span></div>
+                  <span class="withdraw-badge">已撤回</span>
+                </summary>
+                <dl class="withdraw-ledger">
+                  <div><dt>来源文件</dt><dd>{record.sourceName}</dd></div>
+                  <div><dt>原导入时间</dt><dd>{new Date(record.importedAt).toLocaleString('zh-CN')}</dd></div>
+                  <div><dt>撤回完成</dt><dd>{new Date(record.completedAt).toLocaleString('zh-CN')}</dd></div>
+                  <div><dt>删除内容</dt><dd>{record.segmentCount} 个片段 · {record.codingCount} 条 A/B 判断 · {record.purgedExports.length} 份工作台导出</dd></div>
+                  <div><dt>审计清洗</dt><dd>{record.scrubbedAuditCount} 条含原话的操作记录已抹除</dd></div>
+                  <div><dt>涉及主题</dt><dd>{record.assignmentThemeIds.length ? record.assignmentThemeIds.map((id) => props.store.state.themes.find((theme) => theme.id === id)?.name ?? '已删主题').join('、') : '无'}</dd></div>
+                </dl>
+                <Show when={record.references.length}>
+                  <div class="ledger-subtitle">原话引用处理位置</div>
+                  <ul class="ledger-refs">
+                    <For each={record.references}>{(reference) => (
+                      <li>
+                        <button class="citation-link" disabled={!props.store.state.themes.some((theme) => theme.id === reference.themeId)} onClick={() => props.store.selectTheme(reference.themeId)}>
+                          <span>{reference.fieldLabel}{reference.field === 'example' && typeof reference.exampleIndex === 'number' ? ` #${reference.exampleIndex + 1}` : ''} · {reference.action === 'redacted' ? '已抹除' : '自行改写'} · {reference.matchedCount} 处</span>
+                          <p>{reference.themeName}</p>
+                        </button>
+                      </li>
+                    )}</For>
+                  </ul>
+                </Show>
+                <Show when={record.purgedExports.length}>
+                  <div class="ledger-subtitle">已删除的工作台内导出</div>
+                  <ul class="ledger-refs">
+                    <For each={record.purgedExports}>{(log) => <li class="ledger-export">{log.format.toUpperCase()} · {new Date(log.at).toLocaleString('zh-CN')}</li>}</For>
+                  </ul>
+                </Show>
+                <Show when={record.note}><p class="ledger-note">备注：{record.note}</p></Show>
+                <div class="agreement ledger-external-hint">外部已下载或外发的副本需由研究者自行销毁，系统无法远程删除。</div>
+              </details>
+            )}</For>
+          </div>
+        </Show>
       </Show>
     </Paper>
   );

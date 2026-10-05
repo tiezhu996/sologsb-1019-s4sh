@@ -2,12 +2,12 @@ import type { CodingState } from '../types';
 
 export const seedState = (): CodingState => {
   const themes = [
-    { id: 't-education', name: '1. 教育经历', parentId: null, color: '#267365', definition: '正式或非正式的学习经历、学校与教师记忆。', memo: '注意区分入学选择和家庭影响。', examples: ['小学时老师让我第一次接触地图'] },
-    { id: 't-school-choice', name: '1.1 学校选择', parentId: 't-education', color: '#4d9b8f', definition: '关于进入哪所学校、为何选择及其决策者的陈述。', memo: '家长和个人的理由要分别编码。', examples: [] },
-    { id: 't-teacher', name: '1.2 教师影响', parentId: 't-education', color: '#78b7ac', definition: '教师对学习兴趣、职业方向或自我认知的影响。', memo: '', examples: ['他总能把课文讲成故事'] },
+    { id: 't-education', name: '1. 教育经历', parentId: null, color: '#267365', definition: '正式或非正式的学习经历、学校与教师记忆。', memo: '注意区分入学选择和家庭影响。受访者提到“我是在临河镇长大的”，可作为成长地编码的参照。', examples: ['小学时老师让我第一次接触地图'] },
+    { id: 't-school-choice', name: '1.1 学校选择', parentId: 't-education', color: '#4d9b8f', definition: '关于进入哪所学校、为何选择及其决策者的陈述。', memo: '家长和个人的理由要分别编码。典型陈述：“主要是我母亲，她认识镇上学校的王老师”。', examples: [] },
+    { id: 't-teacher', name: '1.2 教师影响', parentId: 't-education', color: '#78b7ac', definition: '教师对学习兴趣、职业方向或自我认知的影响。如受访者回忆“他没有只盯着成绩，常拿旧地图给我们讲河流和城市”。', memo: '', examples: ['他总能把课文讲成故事'] },
     { id: 't-work', name: '2. 工作与迁徙', parentId: null, color: '#b65d38', definition: '职业选择、工作变化以及由此产生的地域迁移。', memo: '', examples: [] },
     { id: 't-migration', name: '2.1 迁徙决定', parentId: 't-work', color: '#d2845f', definition: '搬家、跨地区工作背后的家庭与经济决策。', memo: '', examples: [] },
-    { id: 't-family', name: '3. 家庭支持', parentId: null, color: '#3b6f95', definition: '家庭成员在教育、工作和生活转型中的支持。', memo: '', examples: [] }
+    { id: 't-family', name: '3. 家庭支持', parentId: null, color: '#3b6f95', definition: '家庭成员在教育、工作和生活转型中的支持。', memo: '', examples: ['不是替我做决定，而是在我犹豫的时候把可能性讲清楚'] }
   ];
   const lines = [
     ['00:00:08', '访谈者', '李老师，您小时候是在县城还是乡下长大的？'],
@@ -46,6 +46,8 @@ export const seedState = (): CodingState => {
       note: ''
     })),
     themes,
+    withdrawals: [],
+    exportLogs: [],
     audit: [{ id: 'a-seed', at: new Date().toISOString(), action: '初始化', detail: '载入演示访谈与两个编码者的判断' }]
   };
 };

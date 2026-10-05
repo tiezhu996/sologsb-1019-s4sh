@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test": "node test/run-tests.mjs"
   },
   "dependencies": {
     "@suid/icons-material": "^0.9.0",

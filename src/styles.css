@@ -30,6 +30,7 @@ button:disabled { cursor: not-allowed; opacity: .45; }
 .save-state { gap: 7px; color: rgba(255,255,255,.78); font-size: 12px; margin-right: 8px; white-space: nowrap; }
 .save-state > span { width: 7px; height: 7px; border-radius: 50%; background: #8dd6a4; box-shadow: 0 0 0 4px rgba(141,214,164,.12); }
 .save-state > span.pulsing { animation: pulse 1s infinite; }
+.save-state > span.error { background: #e08a7d; box-shadow: 0 0 0 4px rgba(224,138,125,.18); }
 @keyframes pulse { 50% { opacity: .25; } }
 .project-strip { padding: 28px 34px 20px; justify-content: space-between; align-items: flex-end; }
 .project-strip h1 { margin: 2px 0 0; font-family: "Songti SC", serif; font-size: 29px; letter-spacing: .02em; }
@@ -179,3 +180,60 @@ kbd { justify-self: start; padding: 3px 7px; border: 1px solid #ccd4cf; border-b
 .citation-link:hover { border-color: #9dbbb3; background: #f0f6f2; }
 .citation-link span { color: #788983; font-size: 9px; }
 .citation-link p { margin: 4px 0 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 10px; }
+
+/* ── 撤回同意 ─────────────────────────────────────────── */
+.heading-actions { display: flex; align-items: center; gap: 8px; }
+.withdraw-button { color: var(--danger) !important; border-color: rgba(174,63,50,.4) !important; white-space: nowrap; }
+.inspector-tabs.four { grid-template-columns: repeat(4, 1fr); }
+.inspector-tabs.four button { font-size: 10px; padding: 10px 2px; }
+.withdraw-banner { background: #7d2d24; }
+.notice-banner { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 10px 24px; color: #13423a; background: #dcefe7; font-size: 12px; }
+.notice-banner.recovered { background: #fdf0d8; color: #7b4b24; }
+.notice-close { border: 0; background: transparent; font-size: 18px; color: inherit; opacity: .6; }
+.notice-close:hover { opacity: 1; }
+
+.withdraw-summary { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin: 14px 0 4px; }
+.withdraw-summary div { padding: 12px; border-radius: 10px; background: #f6efec; border-left: 3px solid var(--danger); }
+.withdraw-summary strong { display: block; font-family: "Songti SC", serif; font-size: 22px; color: var(--danger); }
+.withdraw-summary span { color: var(--muted); font-size: 10px; }
+.withdraw-section-title { margin: 16px 0 8px; padding-top: 12px; border-top: 1px solid var(--line); color: #53625e; font-size: 12px; font-weight: 800; }
+.withdraw-ref-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 7px; max-height: 240px; overflow-y: auto; }
+.withdraw-ref-item { display: grid; grid-template-columns: 150px 1fr auto; align-items: center; gap: 10px; padding: 9px 10px; border: 1px solid #e3d6d2; border-radius: 9px; background: #fcf8f6; font-size: 11px; }
+.withdraw-ref-item.readonly { grid-template-columns: 150px 1fr; }
+.withdraw-ref-check { display: flex; gap: 6px; align-items: flex-start; color: #8a4a3e; font-size: 10px; line-height: 1.4; }
+.withdraw-ref-check input { accent-color: var(--danger); margin-top: 2px; }
+.withdraw-ref-check .manual-mode { color: #7b4b24; font-weight: 700; }
+.withdraw-ref-body { min-width: 0; }
+.withdraw-ref-body strong { display: block; font-size: 11px; }
+.withdraw-ref-body span { color: var(--muted); font-size: 10px; }
+.withdraw-warning { border: 1px solid #e8c8a4; }
+.withdraw-confirm { display: flex; gap: 8px; align-items: flex-start; margin-top: 14px; font-size: 11px; line-height: 1.5; color: #5a3a33; }
+.withdraw-confirm input { accent-color: var(--danger); margin-top: 2px; }
+.withdraw-error { margin-top: 10px; }
+
+.withdraw-done-mark { margin: 12px 0; padding: 10px 12px; border-radius: 9px; background: #e8f4ed; color: #286148; font-size: 12px; font-weight: 700; }
+.withdraw-ledger { display: grid; gap: 6px; margin: 6px 0 0; }
+.withdraw-ledger div { display: grid; grid-template-columns: 96px 1fr; gap: 8px; font-size: 11px; }
+.withdraw-ledger dt { color: var(--muted); margin: 0; }
+.withdraw-ledger dd { margin: 0; color: #2c4843; }
+.withdraw-badge { display: inline-block; padding: 2px 9px; border-radius: 100px; background: #f6ddd7; color: var(--danger); font-size: 10px; font-weight: 700; white-space: nowrap; }
+.withdraw-badge.manual { background: #fcefdc; color: #8a5a2a; }
+.withdraw-ref-list.compact { max-height: 190px; }
+.withdraw-export-list { list-style: none; margin: 6px 0 0; padding: 0; display: grid; gap: 4px; color: var(--muted); font-size: 11px; }
+.withdraw-done .warning-box { margin-bottom: 8px; }
+
+/* 撤回记录标签页 */
+.withdraw-ledger-list { display: grid; gap: 10px; padding: 14px 17px; max-height: 100%; overflow-y: auto; }
+.withdraw-ledger-card { border: 1px solid #e6d8d4; border-radius: 10px; background: #fcf9f8; padding: 10px 12px; }
+.withdraw-ledger-card summary { display: flex; align-items: center; justify-content: space-between; gap: 8px; cursor: pointer; list-style: none; font-size: 12px; }
+.withdraw-ledger-card summary::-webkit-details-marker { display: none; }
+.withdraw-ledger-card summary strong { display: block; }
+.withdraw-ledger-card summary span { color: var(--muted); font-size: 10px; }
+.withdraw-ledger-card[open] summary { margin-bottom: 8px; }
+.ledger-subtitle { margin: 10px 0 5px; color: #53625e; font-size: 10px; font-weight: 800; letter-spacing: .06em; }
+.ledger-refs { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+.ledger-refs .citation-link { padding: 6px 8px; }
+.ledger-refs .citation-link:disabled { opacity: .55; cursor: not-allowed; }
+.ledger-export { color: var(--muted); font-size: 10px; padding: 3px 0; }
+.ledger-note { margin: 8px 0 4px; color: #775c32; font-size: 11px; line-height: 1.5; }
+.ledger-external-hint { margin-top: 8px; font-size: 10px; }

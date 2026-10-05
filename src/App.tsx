@@ -5,6 +5,7 @@ import ThemeTree from './components/ThemeTree';
 import Inspector from './components/Inspector';
 import ImportDialog from './components/ImportDialog';
 import { CreateThemeDialog, MergeThemeDialog, SplitThemeDialog } from './components/ThemeDialogs';
+import WithdrawDialog from './components/WithdrawDialog';
 import { useCodingStore } from './store/coding-store';
 
 export default function App() {
@@ -15,6 +16,7 @@ export default function App() {
   const [mergeOpen, setMergeOpen] = createSignal(false);
   const [splitOpen, setSplitOpen] = createSignal(false);
   const [shortcutsOpen, setShortcutsOpen] = createSignal(false);
+  const [withdrawId, setWithdrawId] = createSignal('');
 
   const activeSegments = createMemo(() => store.state.segments
     .filter((segment) => segment.transcriptId === store.state.activeTranscriptId)
@@ -85,7 +87,7 @@ export default function App() {
             <div><Typography variant="h6" component="div">访谈主题编码台</Typography><span>INTERPRETIVE CODING WORKBENCH</span></div>
           </div>
           <div class="top-actions">
-            <div class="save-state"><span classList={{ pulsing: !store.storageReady() }} />{store.remoteEnvelope() ? '检测到其他标签页修订' : store.storageReady() ? `已保存 · r${store.state.revision}` : '正在载入本地库'}</div>
+            <div class="save-state" title={store.saveError() ?? undefined}><span classList={{ pulsing: !store.storageReady(), error: !!store.saveError() }} />{store.remoteEnvelope() ? '检测到其他标签页修订' : store.saveError() ? '本地库写入失败，已暂存缓存' : store.storageReady() ? `已保存 · r${store.state.revision}` : '正在载入本地库'}</div>
             <Button color="inherit" size="small" disabled={!store.canUndo()} onClick={store.undo}>撤销</Button>
             <Button color="inherit" size="small" disabled={!store.canRedo()} onClick={store.redo}>重做</Button>
             <Button variant="outlined" color="inherit" size="small" onClick={() => setImportOpen(true)}>导入转写</Button>
@@ -97,8 +99,39 @@ export default function App() {
       <Show when={store.remoteEnvelope()}>
         {(remote) => (
           <div class="conflict-banner" role="alert">
-            <div><strong>另一个标签页写入了较新的版本</strong><span>本地数据库修订 r{remote().revision}。系统没有自动覆盖任何数据，请明确选择保留哪一份。</span></div>
+            <div><strong>另一个标签页写入了较新的版本</strong><span>本地数据库修订 r{remote().revision}。系统没有自动覆盖任何数据，且已自动拦截其中可能包含的已撤回原文，请明确选择保留哪一份。</span></div>
             <div><Button size="small" color="inherit" onClick={store.applyRemoteVersion}>载入其他标签页版本</Button><Button size="small" variant="contained" color="warning" onClick={store.keepLocalVersion}>保留本页并建立新修订</Button></div>
+          </div>
+        )}
+      </Show>
+
+      <Show when={store.withdrawError()}>
+        {(error) => (
+          <div class="conflict-banner withdraw-banner" role="alert">
+            <div><strong>同意撤回写入未完成</strong><span>{error().message} 在处理完成前，请勿关闭本标签页。</span></div>
+            <div>
+              <Button size="small" color="inherit" onClick={() => void store.retryWithdrawal()}>重试撤回写入</Button>
+              <Button size="small" variant="contained" color="warning" onClick={() => void store.restoreFromCheckpoint()}>从检查点恢复</Button>
+              <Button size="small" color="inherit" onClick={store.dismissWithdrawError}>暂不处理</Button>
+            </div>
+          </div>
+        )}
+      </Show>
+
+      <Show when={store.suppressedNotice()}>
+        {(notice) => (
+          <div class="notice-banner" role="status">
+            <span>{notice()}</span>
+            <button class="notice-close" onClick={store.clearSuppressedNotice}>×</button>
+          </div>
+        )}
+      </Show>
+
+      <Show when={store.recoveredNotice()}>
+        {(notice) => (
+          <div class="notice-banner recovered" role="status">
+            <span>{notice()}</span>
+            <button class="notice-close" onClick={store.clearRecoveredNotice}>×</button>
           </div>
         )}
       </Show>
@@ -114,7 +147,7 @@ export default function App() {
       </section>
 
       <main class="workspace-grid">
-        <TranscriptPanel store={store} />
+        <TranscriptPanel store={store} onWithdraw={(id) => setWithdrawId(id)} />
         <ThemeTree store={store} onCreate={(parentId) => { setCreateParent(parentId); setCreateOpen(true); }} onMerge={() => setMergeOpen(true)} onSplit={() => setSplitOpen(true)} />
         <Inspector store={store} />
       </main>
@@ -144,6 +177,7 @@ export default function App() {
       <CreateThemeDialog store={store} open={createOpen()} parentId={createParent()} onClose={() => { setCreateOpen(false); setCreateParent(undefined); }} />
       <MergeThemeDialog store={store} open={mergeOpen()} onClose={() => setMergeOpen(false)} />
       <SplitThemeDialog store={store} open={splitOpen()} onClose={() => setSplitOpen(false)} />
+      <WithdrawDialog open={!!withdrawId()} store={store} transcriptId={withdrawId()} onClose={() => setWithdrawId('')} />
 
       <div class="modal-backdrop" classList={{ hidden: !shortcutsOpen() }} onClick={() => setShortcutsOpen(false)}>
         <section class="modal-card" onClick={(event) => event.stopPropagation()} role="dialog" aria-modal="true">
