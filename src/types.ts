@@ -29,6 +29,23 @@ export interface Transcript {
   sourceName: string;
 }
 
+/**
+ * 撤回同意记录（“墓碑”）。
+ * 不保存任何原文、片段或编码判断，仅保留证明撤回已发生所需的元数据。
+ */
+export interface Withdrawal {
+  id: string;
+  transcriptId: string;
+  title: string;
+  participant: string;
+  sourceName: string;
+  segmentCount: number;
+  codeCount: number;
+  withdrawnAt: string;
+  reason: string;
+  writerId: string;
+}
+
 export interface CodingState {
   revision: number;
   updatedAt: string;
@@ -40,6 +57,8 @@ export interface CodingState {
   transcripts: Transcript[];
   segments: Segment[];
   themes: Theme[];
+  /** 撤回账本的镜像，真实账本独立持久化，任何状态写入都会以账本为准重新净化。 */
+  withdrawals: Withdrawal[];
   audit: Array<{ id: string; at: string; action: string; detail: string }>;
 }
 
@@ -49,3 +68,19 @@ export interface PersistedEnvelope {
   writerId: string;
   state: CodingState;
 }
+
+/** 撤回前的本地检查点，仅在撤回写入失败期间保留，成功清除后立即删除。 */
+export interface WithdrawalCheckpoint {
+  id: string;
+  transcriptId: string;
+  title: string;
+  participant: string;
+  createdAt: string;
+  state: CodingState;
+}
+
+/** 多标签页广播消息：状态快照 / 撤回墓碑 / 撤回前检查点回滚。 */
+export type ChannelMessage =
+  | ({ kind: 'snapshot' } & PersistedEnvelope)
+  | { kind: 'withdrawal'; withdrawal: Withdrawal; writerId: string; at: string }
+  | { kind: 'rollback'; transcriptId: string; writerId: string; at: string };

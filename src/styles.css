@@ -179,3 +179,53 @@ kbd { justify-self: start; padding: 3px 7px; border: 1px solid #ccd4cf; border-b
 .citation-link:hover { border-color: #9dbbb3; background: #f0f6f2; }
 .citation-link span { color: #788983; font-size: 9px; }
 .citation-link p { margin: 4px 0 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 10px; }
+
+/* ---------------- 撤回同意 ---------------- */
+.transcript-heading { gap: 8px; }
+.heading-side { display: flex; align-items: center; gap: 8px; }
+.withdraw-button { flex: 0 0 auto; padding: 5px 11px; border: 1px solid #d9b3ab; border-radius: 7px; background: #fbeee9; color: var(--danger); font-size: 11px; font-weight: 700; }
+.withdraw-button:hover { background: #f7e0da; border-color: var(--danger); }
+.withdraw-banner { display: flex; align-items: center; justify-content: space-between; gap: 20px; padding: 12px 24px; color: #fff; }
+.withdraw-banner > div:first-child { display: flex; flex-direction: column; gap: 3px; font-size: 12px; }
+.withdraw-banner > div:first-child span { opacity: .86; line-height: 1.5; }
+.banner-actions { display: flex; align-items: center; gap: 6px; flex: 0 0 auto; }
+.banner-dismiss { border: 0; background: transparent; color: rgba(255,255,255,.75); font-size: 20px; line-height: 1; padding: 0 3px; }
+.withdraw-banner.error { background: #8c352a; }
+.withdraw-banner.external { background: #7a4b22; }
+.withdraw-banner.stale { background: #6d5a24; }
+.withdraw-banner.success { background: #1f5f55; }
+.withdraw-card h2 { font-size: 21px; }
+.withdraw-target { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 14px; padding: 12px 14px; border: 1px solid #e2d2cf; border-radius: 10px; background: #faf4f2; }
+.withdraw-target strong { display: block; font-size: 14px; }
+.withdraw-target span { color: var(--muted); font-size: 11px; }
+.withdraw-stats { display: flex; gap: 8px; flex: 0 0 auto; }
+.withdraw-stats span { padding: 5px 9px; border-radius: 100px; background: #f2e2dd; color: #8c352a; font-size: 10px; font-weight: 700; }
+.withdraw-warning { margin-top: 12px; line-height: 1.7; }
+.withdraw-warning strong { color: var(--danger); }
+.ref-section { margin-top: 14px; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+.ref-section-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; padding: 11px 13px; background: #f5f7f4; }
+.ref-section-head strong { display: block; font-size: 12px; }
+.ref-section-head span { display: block; margin-top: 2px; color: var(--muted); font-size: 10px; line-height: 1.5; }
+.button.tiny { padding: 6px 10px; font-size: 10px; }
+.ref-empty { padding: 13px; color: #2f6651; background: #eef7f1; font-size: 11px; line-height: 1.65; }
+.ref-list { max-height: 230px; overflow-y: auto; }
+.ref-item { padding: 10px 13px; border-top: 1px solid #ecefeb; }
+.ref-head { display: flex; align-items: center; gap: 8px; }
+.ref-head strong { font-size: 11px; }
+.ref-head .link-button { margin-left: auto; }
+.danger-link { color: var(--danger) !important; }
+.ref-badge { flex: 0 0 auto; padding: 2px 7px; border-radius: 100px; font-size: 9px; font-weight: 700; }
+.ref-badge.def { background: #e1ecef; color: #35626f; }
+.ref-badge.memo { background: #efe8da; color: #7a5f2c; }
+.ref-badge.ex { background: #f3e4e0; color: #8c4638; }
+.ref-item p { margin: 6px 0 0; padding-left: 2px; color: #465a55; font-size: 11px; line-height: 1.6; }
+.ack-row { display: flex; align-items: flex-start; gap: 9px; margin-top: 14px; font-size: 11px; line-height: 1.6; color: #53625e; }
+.ack-row input { margin-top: 2px; accent-color: var(--danger); }
+.withdraw-error { margin-top: 10px; padding: 9px 11px; border-radius: 8px; background: #fbe7e2; color: #8c352a; font-size: 11px; line-height: 1.6; }
+.withdrawal-records { margin-top: 14px; }
+.withdrawal-record { margin-top: 8px; padding: 10px 12px; border: 1px solid #e4d7d4; border-left: 3px solid var(--danger); border-radius: 8px; background: #fbf6f4; }
+.withdrawal-record-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.withdrawal-record-head strong { font-size: 12px; color: #6e322a; }
+.withdrawal-record-head span { color: #98a29e; font-size: 9px; white-space: nowrap; }
+.withdrawal-record-meta { margin-top: 3px; color: var(--muted); font-size: 10px; }
+.withdrawal-record-reason { margin-top: 4px; color: #6d5650; font-size: 10px; line-height: 1.5; }

@@ -1,16 +1,42 @@
 import { createEffect, createSignal } from 'solid-js';
 import { createStore, reconcile, unwrap } from 'solid-js/store';
 import { seedState } from '../data/seed';
-import type { CoderId, CodingState, PersistedEnvelope, Segment, Theme } from '../types';
-import { readEnvelope, writeEnvelope } from '../utils/db';
+import type { ChannelMessage, CoderId, CodingState, PersistedEnvelope, Segment, Theme, Withdrawal } from '../types';
+import {
+  addToLedger,
+  applyWithdrawal,
+  buildWithdrawalEntry,
+  clearCheckpoint,
+  findReferences,
+  readCheckpoint,
+  readLedger,
+  removeFromLedger,
+  sanitizeState,
+  writeCheckpoint,
+  type WithdrawalReference
+} from '../utils/withdrawal';
+import {
+  clearCheckpointMirror,
+  readCheckpointMirror,
+  readEnvelope,
+  writeCheckpointMirror,
+  writeEnvelope
+} from '../utils/db';
 
 const STORAGE_KEY = 'sologsb-1019-state-v1';
+const LEDGER_STORAGE_EVENT = 'sologsb-1019-withdrawal-ledger-v1';
 const TAB_ID = crypto.randomUUID();
+
+const normalizeState = (raw: CodingState): CodingState => ({ ...raw, withdrawals: raw.withdrawals ?? [] });
 
 const loadLocal = (): CodingState => {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    if (raw) return JSON.parse(raw) as CodingState;
+    if (raw) {
+      const parsed = normalizeState(JSON.parse(raw) as CodingState);
+      // 任何进入内存的状态都先和撤回账本对账，绝不把已撤回内容带进工作台。
+      return sanitizeState(parsed).state;
+    }
   } catch {
     localStorage.removeItem(STORAGE_KEY);
   }
@@ -25,29 +51,56 @@ const [redoStack, setRedoStack] = createSignal<CodingState[]>([]);
 const [remoteEnvelope, setRemoteEnvelope] = createSignal<PersistedEnvelope | null>(null);
 const [storageReady, setStorageReady] = createSignal(false);
 const [lastSavedAt, setLastSavedAt] = createSignal<Date | null>(null);
+const [staleBlockedCount, setStaleBlockedCount] = createSignal(0);
+const [externalWithdrawal, setExternalWithdrawal] = createSignal<Withdrawal | null>(null);
+const [withdrawError, setWithdrawError] = createSignal<{ transcriptId: string; title: string; message: string } | null>(null);
+const [lastWithdrawal, setLastWithdrawal] = createSignal<Withdrawal | null>(null);
 let channel: BroadcastChannel | null = null;
-let hydrating = false;
 let saveTimer: number | undefined;
+let applyingExternal: Withdrawal['transcriptId'] | null = null;
+
+/** 净化后构造信封。撤回账本是咽喉：快照写入、广播的状态都必须经过它。 */
+const buildEnvelope = (snapshot: CodingState): PersistedEnvelope => {
+  const clean = sanitizeState(snapshot).state;
+  return { revision: clean.revision, updatedAt: clean.updatedAt, writerId: TAB_ID, state: clean };
+};
+
+const postMessage = (message: ChannelMessage) => {
+  try { channel?.postMessage(message); } catch { /* 频道关闭时忽略 */ }
+};
 
 const persist = (snapshot: CodingState) => {
   window.clearTimeout(saveTimer);
   saveTimer = window.setTimeout(async () => {
-    const envelope: PersistedEnvelope = {
-      revision: snapshot.revision,
-      updatedAt: snapshot.updatedAt,
-      writerId: TAB_ID,
-      state: snapshot
-    };
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(snapshot));
-    await writeEnvelope(envelope);
-    setLastSavedAt(new Date());
-    channel?.postMessage(envelope);
+    const envelope = buildEnvelope(snapshot);
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(envelope.state));
+      await writeEnvelope(envelope);
+      setLastSavedAt(new Date());
+      postMessage({ kind: 'snapshot', ...envelope });
+    } catch (error) {
+      console.error('写入本地数据库失败', error);
+    }
   }, 180);
+};
+
+/** 撤回路径使用的即时持久化：失败要能被研究者感知并从检查点恢复。 */
+const persistNow = async (snapshot: CodingState): Promise<PersistedEnvelope> => {
+  window.clearTimeout(saveTimer);
+  const envelope = buildEnvelope(snapshot);
+  // 先写 IndexedDB（抛错可被撤回流程捕获），成功后再覆盖 localStorage，
+  // 避免“本地快照已删原文而 IndexedDB 仍残留旧原文”的泄露窗口。
+  await writeEnvelope(envelope);
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(envelope.state));
+  setLastSavedAt(new Date());
+  postMessage({ kind: 'snapshot', ...envelope });
+  return envelope;
 };
 
 createEffect(() => {
   const snapshot = cloneState(state);
   if (!storageReady()) return;
+  if (applyingExternal) return; // 跨标签页应用撤回时不要用本页旧数据再写一遍
   persist(snapshot);
 });
 
@@ -62,6 +115,16 @@ const transaction = (action: string, detail: string, mutator: (draft: CodingStat
   next.audit = next.audit.slice(0, 250);
   setState(reconcile(next, { merge: false }));
   persist(next);
+};
+
+/** 撤销/重做栈也必须是净化过的，防止通过历史把原话捞回来。 */
+const rememberUndo = (snapshot: CodingState) => {
+  setUndoStack((items) => [...items.slice(-49), sanitizeState(snapshot).state]);
+};
+
+const clearHistory = () => {
+  setUndoStack([]);
+  setRedoStack([]);
 };
 
 const buildTreeOrder = (themes: Theme[]) => {
@@ -87,14 +150,45 @@ const parseTranscript = (raw: string, speakerFallback: string): Array<Pick<Segme
   });
 };
 
+/** 应用来自其他标签页的撤回：本页不提升修订号（撤回页已提升），只做净化对账。 */
+const applyExternalWithdrawal = (withdrawal: Withdrawal) => {
+  const already = state.withdrawals.some((item) => item.transcriptId === withdrawal.transcriptId);
+  const hadContent = state.segments.some((segment) => segment.transcriptId === withdrawal.transcriptId);
+  applyingExternal = withdrawal.transcriptId;
+  const next = sanitizeState(cloneState(state)).state;
+  setState(reconcile(next, { merge: false }));
+  window.setTimeout(() => { applyingExternal = null; }, 0);
+  clearHistory();
+  setRemoteEnvelope(null);
+  if (!already && hadContent) setExternalWithdrawal(withdrawal);
+};
+
 export function useCodingStore() {
   const initialize = async () => {
     await new Promise((resolve) => window.setTimeout(resolve, 0));
+
+    // 启动即与持久撤回账本对账（本地快照可能比账本旧，或被其他标签页先撤回）。
+    const ledger = readLedger();
+    if (ledger.length) {
+      const { state: cleaned, scrubbedThemes } = sanitizeState(cloneState(state));
+      const before = cloneState(state);
+      if (scrubbedThemes.length ||
+          cleaned.segments.length !== before.segments.length ||
+          cleaned.transcripts.length !== before.transcripts.length ||
+          cleaned.withdrawals.length !== (before.withdrawals ?? []).length) {
+        setState(reconcile(cleaned, { merge: false }));
+      }
+    }
+
     try {
       const stored = await readEnvelope();
       const local = cloneState(state);
-      if (stored && (stored.revision > local.revision || stored.updatedAt > local.updatedAt)) {
-        setRemoteEnvelope(stored);
+      if (stored) {
+        // IndexedDB 快照先过账本，防止库里残留旧副本。
+        const incoming = sanitizeState(normalizeState(stored.state)).state;
+        if (incoming.revision > local.revision || incoming.updatedAt > local.updatedAt) {
+          setRemoteEnvelope({ ...stored, state: incoming });
+        }
       }
     } finally {
       setStorageReady(true);
@@ -102,21 +196,74 @@ export function useCodingStore() {
 
     if ('BroadcastChannel' in window) {
       channel = new BroadcastChannel('sologsb-1019-coding');
-      channel.onmessage = (event: MessageEvent<PersistedEnvelope>) => {
-        const incoming = event.data;
-        if (!incoming || incoming.writerId === TAB_ID) return;
+      channel.onmessage = (event: MessageEvent<ChannelMessage>) => {
+        const message = event.data;
+        if (!message) return;
+
+        if (message.kind === 'withdrawal') {
+          if (message.writerId === TAB_ID) return;
+          // 墓碑消息幂等：已撤回则只做一次净化对账。
+          applyExternalWithdrawal(message.withdrawal);
+          return;
+        }
+
+        if (message.kind === 'rollback') {
+          if (message.writerId === TAB_ID) return;
+          // 其他标签页撤回写入失败后恢复了检查点：把它视为一次新修订，走显式冲突流程，
+          // 绝不用它覆盖本页；若本页仍保留撤回结果则由账本在载入时净化。
+          setStaleBlockedCount((count) => count + 1);
+          return;
+        }
+
+        const incoming = message;
+        if (incoming.writerId === TAB_ID) return;
         if (incoming.revision === state.revision && incoming.updatedAt === state.updatedAt) return;
-        setRemoteEnvelope(incoming);
+        const rawIncoming = normalizeState(incoming.state);
+        const { state: cleanState, scrubbedThemes } = sanitizeState(rawIncoming);
+
+        // 关键防护：晚到的旧标签页状态若仍带着已撤回的访谈/片段/原话，净化时会被剥除，
+        // 或其修订早于本页 —— 一律拦截，绝不提供“载入旧版本”，已撤回内容不能回来。
+        const carriedWithdrawnContent = readLedger().some((entry) =>
+          rawIncoming.transcripts.some((transcript) => transcript.id === entry.transcriptId) ||
+          rawIncoming.segments.some((segment) => segment.transcriptId === entry.transcriptId));
+        if ((carriedWithdrawnContent || scrubbedThemes.length || incoming.revision < state.revision) && state.withdrawals.length) {
+          setStaleBlockedCount((count) => count + 1);
+          return;
+        }
+        // 干净的新快照仍交给既有的显式冲突流程，不会静默覆盖。
+        setRemoteEnvelope({ revision: cleanState.revision, updatedAt: cleanState.updatedAt, writerId: incoming.writerId, state: cleanState });
       };
+    }
+
+    // localStorage 存储事件：撤回账本是同步写入的，其他标签页能立即收到，不等异步快照。
+    window.addEventListener('storage', (event) => {
+      if (event.key !== LEDGER_STORAGE_EVENT || !event.newValue) return;
+      try {
+        const ledger = JSON.parse(event.newValue) as Withdrawal[];
+        const newest = ledger[0];
+        if (newest && newest.writerId !== TAB_ID && !state.withdrawals.some((item) => item.id === newest.id)) {
+          applyExternalWithdrawal(newest);
+        }
+      } catch { /* 账本损坏时忽略，本页账本仍完整 */ }
+    });
+
+    // 上次会话撤回写入失败留下检查点：提示研究者恢复或重试。
+    const checkpoint = readCheckpoint() ?? await readCheckpointMirror();
+    if (checkpoint && readLedger().some((item) => item.transcriptId === checkpoint.transcriptId)) {
+      setWithdrawError({
+        transcriptId: checkpoint.transcriptId,
+        title: checkpoint.title,
+        message: '上次撤回同意的清除写入未完成。可以重试彻底清除，或从本地检查点恢复撤回前状态后再处理。'
+      });
     }
   };
 
   const undo = () => {
     const items = undoStack();
     if (!items.length) return;
-    const previous = items[items.length - 1];
+    const previous = sanitizeState(items[items.length - 1]).state;
     setUndoStack(items.slice(0, -1));
-    setRedoStack((redo) => [...redo, cloneState(state)]);
+    setRedoStack((redo) => [...redo, sanitizeState(cloneState(state)).state]);
     setState(reconcile(previous, { merge: false }));
     persist(previous);
   };
@@ -124,9 +271,9 @@ export function useCodingStore() {
   const redo = () => {
     const items = redoStack();
     if (!items.length) return;
-    const next = items[items.length - 1];
+    const next = sanitizeState(items[items.length - 1]).state;
     setRedoStack(items.slice(0, -1));
-    setUndoStack((undoItems) => [...undoItems, cloneState(state)]);
+    rememberUndo(cloneState(state));
     setState(reconcile(next, { merge: false }));
     persist(next);
   };
@@ -262,15 +409,160 @@ export function useCodingStore() {
     });
   };
 
+  /* ---------------- 撤回同意 ---------------- */
+
+  const withdrawalReferences = (transcriptId: string): WithdrawalReference[] =>
+    findReferences(cloneState(state), transcriptId);
+
+  /** 研究者在撤回对话框中逐条处理引用：清空该位置内容，不允许把原话留到撤回后。 */
+  const resolveReference = (reference: WithdrawalReference) => {
+    transaction('处理撤回引用', `清空“${reference.themeName}”的${reference.fieldLabel}`, (draft) => {
+      const theme = draft.themes.find((item) => item.id === reference.themeId);
+      if (!theme) return;
+      if (reference.field === 'definition') theme.definition = '';
+      else if (reference.field === 'memo') theme.memo = '';
+      else theme.examples = theme.examples.filter((_, index) => String(index) !== reference.key);
+    });
+  };
+
+  const resolveAllReferences = (transcriptId: string) => {
+    const references = withdrawalReferences(transcriptId);
+    if (!references.length) return;
+    transaction('批量处理撤回引用', `清空 ${references.length} 处引用了原话的主题文本`, (draft) => {
+      references.forEach((reference) => {
+        const theme = draft.themes.find((item) => item.id === reference.themeId);
+        if (!theme) return;
+        if (reference.field === 'definition') theme.definition = '';
+        else if (reference.field === 'memo') theme.memo = '';
+        else theme.examples = theme.examples.filter((_, index) => String(index) !== reference.key);
+      });
+    });
+  };
+
+  const performWithdrawal = async (transcriptId: string, reason: string): Promise<Withdrawal> => {
+    const snapshot = cloneState(state);
+    const entry = buildWithdrawalEntry(snapshot, transcriptId, reason, TAB_ID);
+    if (!entry) throw new Error('找不到要撤回的访谈');
+
+    // 1. 撤回前本地检查点（localStorage + IndexedDB 双写），写入失败期间可恢复。
+    const checkpoint = writeCheckpoint(snapshot, transcriptId);
+    try {
+      await writeCheckpointMirror(checkpoint);
+    } catch (error) {
+      console.warn('检查点 IndexedDB 镜像写入失败，仍可从 localStorage 恢复', error);
+    }
+
+    // 2. 撤回墓碑先持久化到独立账本——即使后面的状态写入失败，账本也已生效，
+    //    任何旧状态重新写入都会被 sanitizeState 拦截净化。
+    addToLedger(entry);
+
+    // 3. 在内存中彻底清除：访谈、片段原文、A/B 判断、片段备忘、主题文本中的原话。
+    const { state: withdrawn } = applyWithdrawal(snapshot, entry);
+    withdrawn.revision = snapshot.revision + 1;
+    withdrawn.updatedAt = entry.withdrawnAt;
+
+    setWithdrawError(null);
+    applyingExternal = transcriptId;
+    setState(reconcile(withdrawn, { merge: false }));
+    window.setTimeout(() => { applyingExternal = null; }, 0);
+    clearHistory(); // 撤回不可通过撤销重做找回
+
+    // 4. 状态即时持久化；失败则保留检查点并提示，账本依然阻止原话回流。
+    try {
+      await persistNow(withdrawn);
+    } catch (error) {
+      setWithdrawError({ transcriptId, title: entry.title, message: `清除结果写入本地数据库失败：${error instanceof Error ? error.message : '未知错误'}。撤回墓碑已生效，可重试写入或从本地检查点恢复。` });
+      throw error;
+    }
+
+    // 5. 写入成功后删除检查点：彻底清除后工作台只剩处理结果。
+    clearCheckpoint();
+    try { await clearCheckpointMirror(); } catch { /* 镜像清理失败不影响撤回效力 */ }
+
+    postMessage({ kind: 'withdrawal', withdrawal: entry, writerId: TAB_ID, at: entry.withdrawnAt });
+    setLastWithdrawal(entry);
+    return entry;
+  };
+
+  /** 写入失败后的重试：以检查点状态为基础重新执行清除并持久化。 */
+  const retryWithdrawal = async (reason: string): Promise<Withdrawal | null> => {
+    const checkpoint = readCheckpoint() ?? await readCheckpointMirror();
+    if (!checkpoint) {
+      setWithdrawError(null);
+      return null;
+    }
+    const snapshot = sanitizeState(normalizeState(checkpoint.state)).state;
+    const existing = readLedger().find((item) => item.transcriptId === checkpoint.transcriptId);
+    const entry: Withdrawal = existing ?? {
+      ...(buildWithdrawalEntry(snapshot, checkpoint.transcriptId, reason, TAB_ID)!),
+      withdrawnAt: checkpoint.createdAt
+    };
+    const { state: withdrawn } = applyWithdrawal(snapshot, entry);
+    withdrawn.revision = Math.max(snapshot.revision, state.revision) + 1;
+    withdrawn.updatedAt = new Date().toISOString();
+    applyingExternal = checkpoint.transcriptId;
+    setState(reconcile(withdrawn, { merge: false }));
+    window.setTimeout(() => { applyingExternal = null; }, 0);
+    clearHistory();
+    try {
+      await persistNow(withdrawn);
+      clearCheckpoint();
+      await clearCheckpointMirror();
+      setWithdrawError(null);
+      setLastWithdrawal(entry);
+      postMessage({ kind: 'withdrawal', withdrawal: entry, writerId: TAB_ID, at: entry.withdrawnAt });
+      return entry;
+    } catch (error) {
+      setWithdrawError({ transcriptId: checkpoint.transcriptId, title: checkpoint.title, message: `重试写入仍失败：${error instanceof Error ? error.message : '未知错误'}。检查点继续保留。` });
+      throw error;
+    }
+  };
+
+  /** 从本地检查点恢复撤回前状态（仅本标签页），并回滚本页账本，随后研究者可重新处理。 */
+  const restoreFromCheckpoint = async (): Promise<boolean> => {
+    const checkpoint = readCheckpoint() ?? await readCheckpointMirror();
+    if (!checkpoint) return false;
+    const restored = normalizeState(checkpoint.state);
+    removeFromLedger(checkpoint.transcriptId);
+    restored.withdrawals = restored.withdrawals.filter((item) => item.transcriptId !== checkpoint.transcriptId);
+    restored.revision = state.revision + 1;
+    restored.updatedAt = new Date().toISOString();
+    restored.audit.unshift({
+      id: crypto.randomUUID(),
+      at: restored.updatedAt,
+      action: '恢复撤回前检查点',
+      detail: `《${checkpoint.title}》因撤回写入失败，已从本地检查点恢复到撤回前状态，请处理后重新发起撤回`
+    });
+    setState(reconcile(restored, { merge: false }));
+    clearHistory();
+    try {
+      await persistNow(restored);
+      clearCheckpoint();
+      await clearCheckpointMirror();
+      setWithdrawError(null);
+      postMessage({ kind: 'rollback', transcriptId: checkpoint.transcriptId, writerId: TAB_ID, at: restored.updatedAt });
+      return true;
+    } catch (error) {
+      setWithdrawError({ transcriptId: checkpoint.transcriptId, title: checkpoint.title, message: `恢复写入失败：${error instanceof Error ? error.message : '未知错误'}。检查点仍保留，可再次尝试。` });
+      return false;
+    }
+  };
+
+  const dismissExternalNotice = () => setExternalWithdrawal(null);
+  const dismissWithdrawalResult = () => setLastWithdrawal(null);
+  const dismissStaleNotice = () => setStaleBlockedCount(0);
+  const dismissWithdrawError = () => setWithdrawError(null);
+
   const exportCoding = (format: 'json' | 'csv') => {
-    const segmentMap = new Map(state.segments.map((segment) => [segment.id, segment]));
-    const themeMap = new Map(state.themes.map((theme) => [theme.id, theme]));
-    if (format === 'json') return JSON.stringify({ exportedAt: new Date().toISOString(), ...cloneState(state) }, null, 2);
+    // 导出前再与账本对账：已撤回访谈、片段与任何原话都不会进入导出文件。
+    const clean = sanitizeState(cloneState(state)).state;
+    const themeMap = new Map(clean.themes.map((theme) => [theme.id, theme]));
+    if (format === 'json') return JSON.stringify({ exportedAt: new Date().toISOString(), ...clean }, null, 2);
     const escape = (value: string) => `"${value.replaceAll('"', '""')}"`;
     const rows = [['片段编号', '时间', '发言人', '原文', '编码者', '主题路径', '备忘录'].map(escape).join(',')];
-    state.segments.forEach((segment) => {
+    clean.segments.forEach((segment) => {
       (['A', 'B'] as CoderId[]).forEach((coder) => {
-        const name = coder === 'A' ? state.coderA : state.coderB;
+        const name = coder === 'A' ? clean.coderA : clean.coderB;
         const themeIds = segment.assignments[coder];
         const paths = themeIds.length ? themeIds.map((id) => {
           const names: string[] = [];
@@ -281,10 +573,10 @@ export function useCodingStore() {
           }
           return names.join(' / ');
         }) : ['未编码'];
-        rows.push([segment.id, segment.time, segment.speaker, segment.text, name, paths.join(' | '), segmentMap.get(segment.id)?.note ?? ''].map(escape).join(','));
+        rows.push([segment.id, segment.time, segment.speaker, segment.text, name, paths.join(' | '), segment.note].map(escape).join(','));
       });
     });
-    return `\uFEFF${rows.join('\n')}`;
+    return `﻿${rows.join('\n')}`;
   };
 
   const downloadExport = (format: 'json' | 'csv') => {
@@ -306,9 +598,10 @@ export function useCodingStore() {
   const applyRemoteVersion = () => {
     const remote = remoteEnvelope();
     if (!remote) return;
-    setUndoStack((items) => [...items, cloneState(state)]);
+    rememberUndo(cloneState(state));
     setRedoStack([]);
-    setState(reconcile(remote.state, { merge: false }));
+    // 载入的外部版本同样要过账本，且撤回相关的历史不可带回原话。
+    setState(reconcile(sanitizeState(normalizeState(remote.state)).state, { merge: false }));
     setRemoteEnvelope(null);
   };
 
@@ -342,6 +635,21 @@ export function useCodingStore() {
     keepLocalVersion,
     applyRemoteVersion,
     storageReady,
-    lastSavedAt
+    lastSavedAt,
+    // 撤回同意
+    withdrawalReferences,
+    resolveReference,
+    resolveAllReferences,
+    performWithdrawal,
+    retryWithdrawal,
+    restoreFromCheckpoint,
+    staleBlockedCount,
+    externalWithdrawal,
+    withdrawError,
+    lastWithdrawal,
+    dismissExternalNotice,
+    dismissWithdrawalResult,
+    dismissStaleNotice,
+    dismissWithdrawError
   };
 }

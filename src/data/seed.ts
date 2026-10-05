@@ -46,6 +46,7 @@ export const seedState = (): CodingState => {
       note: ''
     })),
     themes,
+    withdrawals: [],
     audit: [{ id: 'a-seed', at: new Date().toISOString(), action: '初始化', detail: '载入演示访谈与两个编码者的判断' }]
   };
 };

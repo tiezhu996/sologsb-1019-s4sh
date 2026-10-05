@@ -130,6 +130,21 @@ export default function Inspector(props: { store: Store }) {
       </Show>
 
       <Show when={section() === 'audit'}>
+        <Show when={props.store.state.withdrawals.length}>
+          <div class="withdrawal-records">
+            <div class="citation-heading">撤回同意记录 <span>{props.store.state.withdrawals.length} 份 · 不含原文</span></div>
+            <For each={props.store.state.withdrawals}>{(entry) => (
+              <div class="withdrawal-record">
+                <div class="withdrawal-record-head">
+                  <strong>《{entry.title}》</strong>
+                  <span>{new Date(entry.withdrawnAt).toLocaleString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}</span>
+                </div>
+                <div class="withdrawal-record-meta">受访者：{entry.participant} · 来源：{entry.sourceName || '未记录'} · 已清除 {entry.segmentCount} 个片段 / {entry.codeCount} 条判断</div>
+                <Show when={entry.reason}><div class="withdrawal-record-reason">撤回备注：{entry.reason}</div></Show>
+              </div>
+            )}</For>
+          </div>
+        </Show>
         <div class="audit-summary">
           <div><strong>{props.store.state.audit.length}</strong><span>次最近操作</span></div>
           <div><strong>{citations().length}</strong><span>条当前主题引用</span></div>
